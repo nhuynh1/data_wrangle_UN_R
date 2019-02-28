@@ -208,7 +208,7 @@ un_hr_us_ca %>%
        subtitle = "Abstain votes excluded")
 ```
 
-62% of Human Rights votes Canada agreed with the US on. Abstain votes excluded.
+81% of Human Rights votes Canada agreed with the US on. Abstain votes excluded.
 ```{r}
 un_hr_us_ca %>%
   summarise(percent_agree = mean(agree == "yes"))
@@ -317,34 +317,28 @@ all_countries_important <- map_dfr(all_countries, function(x){
     mutate(compare_country = x)
 })
 
-# vector to order countries in chart by proportion of yes within important votes
-order_vec <- all_countries_important %>% 
-  spread(agree, n, sep = "_", fill = 0) %>%
-  mutate(prop_no = agree_no / (agree_no + agree_yes),
-         prop_yes = 1 - prop_no) %>%
-  filter(importantvote == 1) %>% 
-  arrange(desc(prop_yes)) %>% ungroup() %>% select(compare_country) %>% as_vector()
-
 
 all_countries_important %>% filter(importantvote == 1) %>%
-  group_by(compare_country) %>%
-  mutate(total_n = sum(n)) %>%
-  ungroup() %>%
-  mutate(compare_country = factor(compare_country, level = order_vec)) %>%
-  arrange(compare_country) %>%
-  head(60) %>%
-  ggplot(aes(x = compare_country, y = n, fill = agree)) + 
-  geom_bar(stat = "identity", position = "fill") +
-  geom_text(aes(label = paste("n=",total_n), y = 1.02)) +
+  spread(agree, n, sep = "_", fill = 0) %>%
+  mutate(no = agree_no / (agree_no + agree_yes),
+         yes = 1 - no) %>%
+  arrange(desc(yes)) %>%
+  head(30) %>%
+  mutate(compare_country = fct_reorder(paste(compare_country, " [", agree_no + agree_yes, "]", sep=""), yes)) %>% 
+  gather(key = "var", value = "prop", -importantvote, -compare_country, -agree_no, -agree_yes) %>%
+  select(-agree_no, -agree_yes) %>%
+  ggplot(aes(x = compare_country, y = prop, fill = var)) + 
+  geom_bar(stat = "identity", position = "stack") +
   labs(x = "", 
         y = "Proportion of Votes",
         fill = "Agreed w/ US",
         title = "Top 30 Countries That Agreed with the US on Important Votes",
-        subtitle = "Human Rights Issues") +
+        subtitle = "Human Rights Issues, n in [brackets] next to country name") +
   scale_y_continuous(labels = percent) +
+  scale_fill_discrete(breaks = c("yes", "no")) +
   coord_flip() +
   theme(legend.position = "top")
 ```
 
 ## Final Thoughts
-I didn't know much about diplomatic relations to begin with, but by exploring the data set some interesting things turned up which led me to do some Googling. From there I learned about what happened with Taiwan and why it is no longer part of the UN, and a bit about the country of Palau and its relationship with the US. Moreover, I learned how to use reduction `map_()` functions from the `purrr` package, and what the the `complete()` function from the `tidyr` is used for. Figuring out how to sort the bars in the last chart was a bit challenging, and I'm not entirely sure that my approach is the best way (but it will do for now).
+I didn't know much about diplomatic relations to begin with, but by exploring the data set some interesting things turned up which led me to do some Googling. From there I learned about what happened with Taiwan and why it is no longer part of the UN, and a bit about the country of Palau and its relationship with the US. Moreover, I learned how to use reduction `map_()` functions from the `purrr` package, and what the the `complete()` function from the `tidyr` is used for. Figuring out how to sort the bars in the last chart was a bit challenging, I've tried it two different ways, and my first attempt didn't seem as "good" and used more code than needed (previous version in my github).
