@@ -1,0 +1,350 @@
+---
+title: "UN Votes - Data Wrangling & Exploration in R"
+author: "Nancy Huynh"
+date: '2018-12-10'
+output: 
+  github_document:
+    toc: TRUE
+---
+
+
+# UN Votes
+While working my way through the courses for Datacamp's Data Analyst Track I completed a course that introduced me to the UN Votes data set found in this the `unvotes` [package](https://cran.r-project.org/web/packages/unvotes/). It seemed like an interesting and perfect data set to wrangle, analyse, and extend what I learned in the Data Analyst Track.
+
+## Data Imports and Libraries
+```{r message=FALSE, warning=FALSE}
+#LOAD LIBRARIES
+library(tidyverse)
+library(lubridate)
+library(scales)
+
+library(unvotes) #for the UN Votes data
+```
+
+## Initial Data Exploration
+
+United Nations General Assembly Voting Data package (unvotes) contains three tables of data. ```un_votes``` contains data on each country's vote on roll calls (rcid). 738764 votes are recorded in the dataset.
+
+```{r}
+head(un_votes)
+str(un_votes)
+```
+
+
+```un_roll_call_issues``` contains information on each roll call vote (rcid) issue, specifically one of six types of issue (Palestinian conflict, Colonialism, Human rights, Arms control an disarmament, Nuclear weapons and nuclear material, and Economic development)
+
+```{r}
+head(un_roll_call_issues)
+str(un_roll_call_issues)
+```
+
+
+```un_roll_calls``` contains data of information about each roll call vote (rcid), including session, date, description, and relevant resolution that was voted on
+
+```{r}
+head(un_roll_calls)
+str(un_roll_calls)
+```
+
+### How many roll call votes did each type of issue get?
+```{r}
+un_roll_call_issues %>% 
+  count(issue, sort = TRUE)
+```
+
+### How many resolutions did each type of issue get over the years?
+Note that a number of issues were not categorized under the 6 types of issues
+
+```{r}
+by_year_topic <- un_roll_calls %>% 
+  left_join(un_roll_call_issues, by = "rcid") %>%
+  mutate(year = year(date)) %>%
+  filter(!is.na(issue)) %>% # filter out the ones that were not categorized
+  group_by(year, issue) %>%
+  count()
+
+head(by_year_topic, 20)
+
+```
+
+Let's see how the number of resolutions changed over the years
+```{r}
+by_year_topic %>%
+  ggplot(aes(x = year, y = n)) +
+  geom_point() +
+  geom_smooth(se = FALSE, color = "red") +
+  facet_wrap(~ issue) +
+  ylab("Number of Resolutions Voted On")
+```
+
+### What proportion of yes/no/abstain votes were received per issue type?
+```{r warning=FALSE}
+un_votes %>% 
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  group_by(issue) %>%
+  summarize(vote_count = n(), 
+            percent_yes = mean(vote == "yes"),
+            percent_no = mean(vote == "no"),
+            percent_abstain = mean(vote == "abstain")) %>%
+  arrange(percent_yes)
+```
+
+## Deeper Dive into Human Rights
+Did you notice that the percent of yes votes for Human Rights issues is a bit lower compared to the others? 75%, compared to ~ 80% for the other issues. I looked further into these issues to see how agreeable countries were on Human Rights issues.
+
+### Which country(ies) had the lowest proportion of yes votes on Human Rights issues?
+The US isn't very agreeable! Although it isn't the most unagreeable, that goes to Palau.
+```{r warning=FALSE}
+hr_country_votes <- un_votes %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  filter(short_name == "hr") %>%
+  group_by(country) %>%
+  summarize(vote_count = n(),
+            percent_yes = mean(vote == "yes"),
+            percent_no = mean(vote == "no"),
+            percent_abstain = mean(vote == "abstain")) 
+
+head(arrange(hr_country_votes, percent_yes), 10)
+head(arrange(hr_country_votes, desc(percent_yes)), 10)
+```
+
+### How has the US "yes" votes on Human Rights issues changed over time?
+
+```{r message = FALSE, warning = FALSE}
+hr_US_votes <- un_votes %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  filter(short_name == "hr", country == "United States of America") %>%
+  left_join(un_roll_calls, by = "rcid") %>%
+  mutate(year = year(date)) %>%
+  group_by(year) %>%
+  summarize(vote_count = n(),
+            percent_yes = mean(vote == "yes"))
+
+ggplot(hr_US_votes, aes(x = year, y = percent_yes, size = vote_count)) +
+  geom_point(alpha = 0.5) +
+  geom_line(size = 1, color = "dodgerBlue") +
+  scale_y_continuous(labels = percent) +
+  theme(legend.position = "top") +
+  labs(title = "US \"Yes\" Votes on Human Rights Issues")
+```
+
+
+### How does the United States "yes" votes on Human Rights compare to other countries over the years?
+Countries such as Canada, UK, and Australia.
+Notice after 1980 the percentage of yes votes between the countries follow a similar pattern with the highest percent of yes votes (after 1980) in 1995. After 1995 the US percent of yes votes declines more sharply than the other countries.
+```{r warning=FALSE}
+countries <- c("US", "CA", "GB", "AU")
+
+un_votes %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  filter(short_name == "hr", country_code %in% countries) %>%
+  left_join(un_roll_calls, by = "rcid") %>%
+  mutate(year = year(date)) %>%
+  group_by(country, year) %>%
+  summarize(vote_count = n(),
+            percent_yes = mean(vote == "yes")) %>%
+  ggplot(aes(x = year, y = percent_yes, color = country)) +
+  geom_point(alpha = 0.3) +
+  stat_smooth(aes(year, percent_yes), method = "lm", se = FALSE) +
+  geom_vline(xintercept = 1995, linetype = 2) +
+  scale_y_continuous(labels = percent) +
+  theme(legend.position = "top") +
+  facet_wrap(~country)
+
+```
+
+
+### What proportion of the US' Human Rights votes did Canada agree with over time?
+First join the three data frames together, and filter to include only Human Righs issues, into one `un_votes_joined`.
+
+```{r warning = FALSE, message = FALSE}
+un_votes_joined <- un_votes %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  left_join(un_roll_calls, by = "rcid") %>%
+  filter(short_name == "hr")
+
+```
+
+Then use the following custom function `agreeFunc` to return data frame of all votes casted by US (`c_one = "United States of America"`) including a column `agree` indicating if Canada (`c_two = "Canada"`) casted the same vote.
+
+```{r}
+# inc_abstain = TRUE would count votes where both countries abstained as agree = "yes", if FALSE all abstain votes are filtered out
+agreeFunc <- function(data, c_one, c_two, inc_abstain = TRUE) {
+  
+  country_one <- filter(data, country == c_one)
+  country_two <- filter(data, country == c_two)
+
+  if(!inc_abstain){
+    country_one <- filter(country_one, vote != "abstain")
+    country_two <- filter(country_two, vote != "abstain")
+  }
+  
+  country_one <- semi_join(country_one, country_two, by = "rcid")
+  
+  agreed <- semi_join(country_one, country_two, by = c("rcid", "vote")) %>%
+    mutate(agree = "yes")
+  
+  disagreed <- anti_join(country_one, country_two, by = c("rcid", "vote")) %>%
+    mutate(agree = "no")
+  
+  return(bind_rows(agreed, disagreed))
+}
+```
+
+Call `agreeFunc()` for US and Canada on `un_votes_joined` and exclude "abstain" votes. Then plot line graph of the percentage of agreed votes by year.
+```{r}
+un_hr_us_ca <- agreeFunc(un_votes_joined, "United States of America", "Canada", inc_abstain = FALSE) 
+
+un_hr_us_ca %>%
+  mutate(year = year(date)) %>%
+  group_by(year) %>%
+  summarize(percent_agree = mean(agree == "yes")) %>%
+  ggplot(aes(x = year, y = percent_agree)) +
+  geom_line(color = "lightseagreen") +
+  scale_y_continuous(labels = percent, limits = c(0,1)) +
+  labs(x = "Year", 
+       y = "Proportion (%) of votes agreed",
+       title = "Proportion of US Human Rights Votes that Canada Agreed On",
+       subtitle = "Abstain votes excluded")
+```
+
+62% of Human Rights votes Canada agreed with the US on. Abstain votes excluded.
+```{r}
+un_hr_us_ca %>%
+  summarise(percent_agree = mean(agree == "yes"))
+```
+
+### Which countries' votes agree with the US most often on Human Rights?
+Not too surprising that Israel is one of the top countries that agree with the US since the US supports Israel on numerous geo-political factors, notably military. It's probably in Israel's best interest to agree with the US on diplomatic issues. But what's the deal with Palau? Turns out the US and Palau have strong bilateral relations [Wikipedia](https://en.wikipedia.org/wiki/Palau%E2%80%93United_States_relations)
+```{r}
+
+all_countries <- unique(un_votes_joined$country)
+sum(is.na(all_countries)) # Make sure all countries have names
+
+all_countries <- all_countries[-which(all_countries == "United States of America")]
+
+all_country_percent_agree <- map_dbl(all_countries, function(x) {
+  agreeFunc(un_votes_joined, "United States of America", x , inc_abstain = FALSE) %>%
+    summarise(percent_agree = mean(agree == "yes")) %>%
+    pluck(1)
+})
+
+top_country_agree <- data.frame(country = all_countries, percent_agree = all_country_percent_agree) %>%
+  arrange(desc(percent_agree)) %>%
+  head(30)
+
+top_country_agree %>%
+  ggplot(aes(x = reorder(country, percent_agree), y = percent_agree)) +
+  geom_col() +
+  labs(title = "Proportion of Country Votes that Agree with the US",
+       subtitle = "Human Rights Issues Votes Only",
+       y = "Proportion of Agreed Votes",
+       x = "Country") +
+  scale_y_continuous(limits = c(0,1), labels = percent) +
+  coord_flip()
+
+```
+
+### The countries that agreed with the US least often on Human Rights?
+Hey look at that North Korea (Democratic People's Republic of Korea) agreed with the US least often on Human Rights issues!
+```{r}
+bottom_country_agree <- data.frame(country = all_countries, percent_agree = all_country_percent_agree) %>%
+  arrange(desc(percent_agree)) %>%
+  tail(30)
+
+bottom_country_agree %>%
+  ggplot(aes(x = reorder(country, -percent_agree), y = percent_agree)) +
+  geom_col() +
+  labs(title = "Proportion of Country Votes that Agree with the US",
+       subtitle = "Human Rights Issues Votes Only",
+       y = "Proportion of Agreed Votes",
+       x = "Country") +
+  scale_y_continuous(limits = c(0,1), labels = percent) +
+  coord_flip()
+```
+
+#### Combine the top 30 with the bottom 30 into one chart
+Just playing around with ggplot2 a bit to show the top and bottom 30 countries that agree with the US on Human Rights issues.
+```{r fig.height = 7, fig.width = 10}
+bind_rows(top_country_agree, bottom_country_agree) %>%
+  ggplot(aes(x = reorder(country, percent_agree), y = percent_agree)) +
+  geom_col() +
+  labs(title = "Proportion of Country Votes that Agree with the US",
+       subtitle = "Human Rights Issues Votes Only",
+       y = "Proportion of Agreed Votes",
+       x = "") +
+  scale_y_continuous(limits = c(0,1), labels = percent) +
+  geom_vline(xintercept = 30.5, linetype = 2, color = "red") +
+  geom_label(aes(x = 30.5, y = 0.9, label = "top 30 \n bottom 30")) +
+  coord_flip()
+```
+
+### Did Canada and the US' agreeableness on Human Rights differ for important votes?
+A larger propotion of important votes are agreed on by the two countries!
+```{r}
+un_hr_us_ca %>%
+  group_by(importantvote, agree) %>%
+  summarise(total = sum(n())) %>%
+  group_by(importantvote) %>%
+  mutate(prop = total / sum(total)) %>%
+  ggplot(aes(x = factor(importantvote), y = prop, fill = agree)) +
+    geom_bar(stat = "identity", position = "fill") +
+    geom_text(aes(label = paste(round(prop*100, 1), "%", "[n=", total, "]")), position = position_stack(vjust = 0.5)) +
+    scale_x_discrete(breaks = c(0, 1),
+                     labels = c("No", "Yes")) +
+    scale_y_continuous(labels = percent) +
+    xlab("Flagged as Important Vote")
+
+```
+
+### Which countries agreed with the US the most on important Human Rights votes?
+Notice that Taiwan is missing from this chart, even though it was within the top of the earlier chart showing proportion of agreed Human Rights votes. Taiwan was no longer part of the UN after October 25, 1971 [Wikipedia](https://en.m.wikipedia.org/wiki/United_Nations_General_Assembly_Resolution_2758), and the importantvote classifications began with session 39, which was in 1984.
+```{r fig.height=10, fig.width=10}
+# make sure importantvote is a factor to ensure complete() works as expected below
+un_votes_joined$importantvote <- factor(un_votes_joined$importantvote) 
+
+all_countries_important <- map_dfr(all_countries, function(x){
+  agree_temp <- agreeFunc(un_votes_joined, "United States of America", x, FALSE)
+  agree_temp %>%
+    # make sure agree is a factor to ensure complete() works as expected below
+    mutate(agree = factor(agree)) %>%
+    group_by(importantvote, agree) %>%
+    summarise(n = sum(n())) %>%
+    ungroup() %>%
+    # complete() will ensure all combinations of importantvote and agree are being returned
+    # i.e. if there are no agreed votes that are important for a specific country than it would return 0, as opposed to return no row for the combination
+    complete(importantvote, agree, fill = list(n = 0)) %>%
+    mutate(compare_country = x)
+})
+
+# vector to order countries in chart by proportion of yes within important votes
+order_vec <- all_countries_important %>% 
+  spread(agree, n, sep = "_", fill = 0) %>%
+  mutate(prop_no = agree_no / (agree_no + agree_yes),
+         prop_yes = 1 - prop_no) %>%
+  filter(importantvote == 1) %>% 
+  arrange(desc(prop_yes)) %>% ungroup() %>% select(compare_country) %>% as_vector()
+
+
+all_countries_important %>% filter(importantvote == 1) %>%
+  group_by(compare_country) %>%
+  mutate(total_n = sum(n)) %>%
+  ungroup() %>%
+  mutate(compare_country = factor(compare_country, level = order_vec)) %>%
+  arrange(compare_country) %>%
+  head(60) %>%
+  ggplot(aes(x = compare_country, y = n, fill = agree)) + 
+  geom_bar(stat = "identity", position = "fill") +
+  geom_text(aes(label = paste("n=",total_n), y = 1.02)) +
+  labs(x = "", 
+        y = "Proportion of Votes",
+        fill = "Agreed w/ US",
+        title = "Top 30 Countries That Agreed with the US on Important Votes",
+        subtitle = "Human Rights Issues") +
+  scale_y_continuous(labels = percent) +
+  coord_flip() +
+  theme(legend.position = "top")
+```
+
+## Final Thoughts
+I didn't know much about diplomatic relations to begin with, but by exploring the data set some interesting things turned up which led me to do some Googling. From there I learned about what happened with Taiwan and why it is no longer part of the UN, and a bit about the country of Palau and its relationship with the US. Moreover, I learned how to use reduction `map_()` functions from the `purrr` package, and what the the `complete()` function from the `tidyr` is used for. Figuring out how to sort the bars in the last chart was a bit challenging, and I'm not entirely sure that my approach is the best way (but it will do for now).
